@@ -1,0 +1,139 @@
+import requests  # Webリクエストを送るためのライブラリ
+import logging  # ログを記録するためのライブラリ
+import time  # 再試行の間に待機するためのライブラリ
+
+
+# ログの設定
+logging.basicConfig(
+    level=logging.INFO,  # ログレベルをINFOに設定
+    format="%(asctime)s - %(levelname)s - %(message)s",  # 時刻を含むフォーマット
+    handlers=[
+        logging.FileHandler("recaptcha_solver.log"),  # ログをファイルにも保存
+        logging.StreamHandler(),  # コンソールにも出力
+    ],
+)
+
+
+# APIキーの設定
+CLIENT_KEY = (
+    "next_b6e68427ad2a68a67ad26c6b1888c744a8"  # NextCaptchaのAPIキーで石黒のものです
+)
+WEBSITE_URL = "https://www.google.com/recaptcha/api2/demo"  # CAPTCHAが設置されているGoogleのデモページのURLです
+WEBSITE_KEY_V2 = "6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-"  # reCAPTCHA v2 のキー※Googleのリキャプチャのデモサイトのデベロッパーツールでsitekeyで取得したもの
+
+
+def solve_recaptcha_v2():
+    try:
+        # タスク作成
+        task_payload = {
+            "type": "RecaptchaV2TaskProxyless",  # reCAPTCHA v2 タスクのタイプ
+            "websiteURL": WEBSITE_URL,  # CAPTCHAが設置されているページのURL
+            "websiteKey": WEBSITE_KEY_V2,  # reCAPTCHA v2 のサイトキー
+        }
+        logging.info(
+            f"Sending createTask request: {task_payload}"
+        )  # タスク作成リクエストを送信
+        response = requests.post(
+            "https://api.nextcaptcha.com/createTask",  # タスク作成のためのURL
+            json={
+                "clientKey": CLIENT_KEY,
+                "task": task_payload,
+            },  # リクエストのペイロード
+            timeout=10,  # タイムアウト設定（10秒）
+        )
+        response.raise_for_status()  # ステータスコードがエラーを示す場合に例外を発生させる
+        result = response.json()  # レスポンスをJSON形式で取得しています
+        logging.info(
+            f"createTask response: {result}"
+        )  # タスク作成のレスポンスをログに記録しています
+
+        task_id = result.get("taskId")  # タスクIDを取得します
+        if not task_id:  # タスクIDが取得できなかった場合
+            raise ValueError(
+                "Failed to create task: " + str(result)
+            )  # エラーを発生させる
+
+        # 解決待ち
+        for attempt in range(1, 21):  # 最大20回の再試行します
+            logging.info(
+                f"Waiting for task {task_id} to be solved... Attempt {attempt}/20"
+            )  # 再試行回数をログに記録
+            time.sleep(5)  # 5秒待機
+            response = requests.post(
+                "https://api.nextcaptcha.com/getTaskResult",  # タスク結果を取得するためのURL
+                json={
+                    "clientKey": CLIENT_KEY,
+                    "taskId": task_id,
+                },  # リクエストのペイロード
+                timeout=10,  # タイムアウト設定（10秒）
+            )
+            response.raise_for_status()  # ステータスコードがエラーを示す場合に例外を発生させる
+            result = response.json()  # レスポンスをJSON形式で取得
+            logging.info(
+                f"getTaskResult response: {result}"
+            )  # タスク結果のレスポンスをログに記録します
+
+            if (
+                result.get("errorId") == 0 and result.get("status") == "ready"
+            ):  # タスクが成功した場合
+                logging.info(
+                    f"Task {task_id} solved successfully: {result['solution']}"
+                )  # 成功メッセージをログに記録します
+                return result.get("solution", {}).get(
+                    "gRecaptchaResponse"
+                )  # 解決されたトークンを返します
+
+        logging.error(
+            f"Task {task_id} could not be solved after 20 retries."
+        )  # タスクが解決できなかった場合にエラーメッセージをログに記録
+        return None  # Noneを返す
+
+    except Exception as e:  # 例外が発生した場合
+        logging.error(
+            f"An error occurred while solving reCAPTCHA: {e}"
+        )  # エラーメッセージをログに記録
+        return None  # Noneを返す
+
+
+def verify_recaptcha(secret_key, g_recaptcha_response):
+    """
+    reCAPTCHAトークンをGoogleのAPIで検証します。
+    """
+    try:
+        url = "https://www.google.com/recaptcha/api/siteverify"
+        data = {
+            "secret": secret_key,
+            "response": g_recaptcha_response,
+        }
+        response = requests.post(url, data=data)
+        result = response.json()
+
+        if result.get("success"):
+            logging.info("reCAPTCHA認証に成功しました")
+            return True
+        else:
+            logging.error("reCAPTCHA認証に失敗しました")
+            return False
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error occurred while verifying reCAPTCHA: {e}")
+        return False
+
+
+# reCAPTCHA v2 の解決
+recaptcha_v2_response = solve_recaptcha_v2()  # reCAPTCHA v2 を解決
+
+# reCAPTCHAトークンを使用
+if recaptcha_v2_response:
+    logging.info(
+        f"Using reCAPTCHA v2 token: {recaptcha_v2_response}"
+    )  # トークンをログに記録
+    print(
+        f"Using reCAPTCHA v2 token: {recaptcha_v2_response}"
+    )  # トークンをコンソールに出力
+
+    # GoogleでreCAPTCHAトークンを検証
+    SECRET_KEY = "YOUR_GOOGLE_RECAPTCHA_SECRET_KEY"  # GoogleのreCAPTCHA秘密鍵
+    if verify_recaptcha(SECRET_KEY, recaptcha_v2_response):
+        logging.info("reCAPTCHA verification passed.")
+    else:
+        logging.error("reCAPTCHA verification failed.")
