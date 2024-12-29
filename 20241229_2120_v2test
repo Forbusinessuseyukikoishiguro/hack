@@ -1,0 +1,106 @@
+import requests
+import logging
+import time
+
+# ログの設定
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("recaptcha_solver.log"), logging.StreamHandler()],
+)
+
+# APIキーの設定
+CLIENT_KEY = (
+    "next_b6e68427ad2a68a67ad26c6b1888c744a8"  # ここにNextCaptchaのAPIキーを入力
+)
+WEBSITE_URL = "https://takblog.site/sample/recaptcha-v2/"  # ターゲットサイトのURL
+WEBSITE_KEY_V2 = "6Lfgl7AcAAAAAEFuErhBiwdPXZvivGlqkYBA7p7Y"  # サイトのreCAPTCHA v2キー
+
+
+def solve_recaptcha_v2():
+    try:
+        # タスク作成
+        task_payload = {
+            "type": "RecaptchaV2TaskProxyless",  # reCAPTCHA v2 タスクのタイプ
+            "websiteURL": WEBSITE_URL,  # CAPTCHAが設置されているページのURL
+            "websiteKey": WEBSITE_KEY_V2,  # reCAPTCHA v2 のサイトキー
+        }
+        logging.info(f"Sending createTask request: {task_payload}")
+        response = requests.post(
+            "https://api.nextcaptcha.com/createTask",  # タスク作成のためのURL
+            json={
+                "clientKey": CLIENT_KEY,
+                "task": task_payload,
+            },
+            timeout=10,  # タイムアウト設定（10秒）
+        )
+        response.raise_for_status()
+        result = response.json()  # レスポンスをJSON形式で取得
+        logging.debug(f"createTask response: {result}")
+
+        task_id = result.get("taskId")
+        if not task_id:
+            raise ValueError(f"Failed to create task: {result}")
+
+        # 解決待機
+        for attempt in range(1, 21):
+            logging.info(
+                f"Waiting for task {task_id} to be solved... Attempt {attempt}/20"
+            )
+            time.sleep(5)  # 5秒待機
+            response = requests.post(
+                "https://api.nextcaptcha.com/getTaskResult",
+                json={
+                    "clientKey": CLIENT_KEY,
+                    "taskId": task_id,
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            result = response.json()
+            logging.debug(f"getTaskResult response: {result}")
+
+            if result.get("errorId") == 0 and result.get("status") == "ready":
+                logging.info(
+                    f"Task {task_id} solved successfully: {result['solution']}"
+                )
+                return result.get("solution", {}).get("gRecaptchaResponse")
+
+        logging.error(
+            f"Task {task_id} could not be solved after 20 retries. Response: {result}"
+        )
+        return None
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request error occurred: {e}")
+        return None
+    except Exception as e:
+        logging.error(f"Error occurred: {e}")
+        return None
+
+
+# トークンを取得してフォーム送信
+recaptcha_v2_response = solve_recaptcha_v2()
+if recaptcha_v2_response:
+    logging.info(f"Using reCAPTCHA v2 token: {recaptcha_v2_response}")
+    print(f"Using reCAPTCHA v2 token: {recaptcha_v2_response}")
+
+    # フォーム送信（例）
+    try:
+        submit_payload = {
+            "g-recaptcha-response": recaptcha_v2_response,  # gRecaptchaResponseを設定
+            "other_form_field_1": "value1",  # 他のフォームフィールドのデータ
+        }
+
+        form_url = WEBSITE_URL  # サイトのフォームURL
+        form_response = requests.post(form_url, data=submit_payload)
+        form_response.raise_for_status()  # ステータスコードがエラーを示す場合に例外を発生させる
+
+        logging.info("Form successfully submitted.")
+        print("Form successfully submitted.")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error submitting form: {e}")
+        print(f"Error submitting form: {e}")
+else:
+    logging.error("Failed to solve reCAPTCHA v2.")
+    print("Failed to solve reCAPTCHA v2.")
