@@ -1,0 +1,62 @@
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+import logging
+
+# ログ設定
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("form_submission.log"), logging.StreamHandler()],
+)
+
+# URLとreCAPTCHAのトークン（この部分を適切に設定してください）
+WEBSITE_URL = "https://takblog.site/sample/recaptcha-v2/"  # 対象URL
+recaptcha_v2_response = "your_recaptcha_response"  # reCAPTCHAのトークン
+
+# Chromeのオプション設定
+chrome_options = Options()
+# chrome_options.add_argument("--headless")  # ヘッドレスモード（ブラウザを表示しない）
+
+# ドライバーの設定
+driver = webdriver.Chrome(
+    service=Service(ChromeDriverManager().install()), options=chrome_options
+)
+
+try:
+    # ページを開く
+    driver.get(WEBSITE_URL)
+
+    # g-recaptcha-responseの設定
+    recaptcha_input = WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.NAME, "g-recaptcha-response"))
+    )
+    driver.execute_script(
+        "arguments[0].value = arguments[1];", recaptcha_input, recaptcha_v2_response
+    )
+
+    # 他のフォームフィールドを待機して入力
+    other_field_1 = WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.NAME, "other_form_field_1"))
+    )
+    other_field_1.send_keys("value1")
+
+    # 送信ボタンを「送信」というテキストで探してクリック
+    submit_button = WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable((By.XPATH, "//*[text()='送信']"))
+    )
+    submit_button.click()
+
+    logging.info("Form successfully submitted using Selenium.")
+    print("Form successfully submitted using Selenium.")
+
+except Exception as e:
+    logging.error(f"Error occurred while clicking the submit button: {e}")
+    print(f"Error occurred while clicking the submit button: {e}")
+
+finally:
+    driver.quit()
