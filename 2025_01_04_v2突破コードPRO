@@ -1,74 +1,122 @@
+import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
+import requests
+import logging
 
 
-def login_with_selenium(url, user_id, password):
-    driver = webdriver.Chrome()  # WebDriverの初期化（ChromeDriverを使用）
-    driver.get(url)  # ログインページを開く
+# ログの設定（簡略化）
+logging.basicConfig(
+    level=logging.INFO,  # INFO レベルのみ
+    format="%(message)s",  # シンプルなフォーマット
+    handlers=[logging.FileHandler("recaptcha_solver.log"), logging.StreamHandler()],
+)
+
+
+# APIキーとURL設定
+CLIENT_KEY = "next_b6e68427ad2a68a67ad26c6b1888c744a8"
+WEBSITE_URL = "https://takblog.site/sample/recaptcha-v2/"
+WEBSITE_KEY_V2 = "6Lfgl7AcAAAAAEFuErhBiwdPXZvivGlqkYBA7p7Y"
+
+
+
+
+# reCAPTCHA v2解決関数
+def solve_recaptcha_v2():
+    try:
+        task_payload = {
+            "type": "RecaptchaV2TaskProxyless",
+            "websiteURL": WEBSITE_URL,
+            "websiteKey": WEBSITE_KEY_V2,
+        }
+        response = requests.post(
+            "https://api.nextcaptcha.com/createTask",
+            json={"clientKey": CLIENT_KEY, "task": task_payload},
+            timeout=10,
+        )
+        response.raise_for_status()
+        result = response.json()
+
+
+        task_id = result.get("taskId")
+        if not task_id:
+            logging.info("解決失敗: タスク作成エラー")
+            return None
+
+
+        for _ in range(20):
+            time.sleep(5)
+            response = requests.post(
+                "https://api.nextcaptcha.com/getTaskResult",
+                json={"clientKey": CLIENT_KEY, "taskId": task_id},
+                timeout=10,
+            )
+            response.raise_for_status()
+            result = response.json()
+
+
+            if result.get("errorId") == 0 and result.get("status") == "ready":
+                logging.info("解決成功")
+                return result.get("solution", {}).get("gRecaptchaResponse")
+
+
+        logging.info("解決失敗: タスク解決できず")
+        return None
+    except Exception:
+        logging.info("解決失敗: エラー発生")
+        return None
+
+
+
+
+# reCAPTCHAトークンを取得してフォームを送信
+recaptcha_v2_response = solve_recaptcha_v2()
+if recaptcha_v2_response:
+    logging.info("トークン取得成功")
+    print("reCAPTCHA 解決成功")
+
+
+    # Seleniumを使ってブラウザを操作
+    chrome_options = Options()
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()), options=chrome_options
+    )
 
 
     try:
-        # フレームに切り替える
-        WebDriverWait(driver, 30).until(
-            EC.frame_to_be_available_and_switch_to_it((By.CSS_SELECTOR, 'frame[src="./login.do"]'))
+        driver.get(WEBSITE_URL)
+
+
+        recaptcha_input = driver.find_element(By.NAME, "g-recaptcha-response")
+        driver.execute_script(
+            "arguments[0].value = arguments[1];", recaptcha_input, recaptcha_v2_response
         )
 
 
-        # ログインIDとパスワードのフィールドが表示されるまで待機
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.NAME, 'loginid'))
-        )
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.NAME, 'passwd'))
-        )
+        submit_button = driver.find_element(By.XPATH, "//*[text()='送信']")
+        submit_button.click()
 
 
-        # ログインIDとパスワードを入力
-        login_field = driver.find_element(By.NAME, 'loginid')
-        password_field = driver.find_element(By.NAME, 'passwd')
+        print("フォーム送信成功")
+        logging.info("フォーム送信成功")
 
 
-        login_field.send_keys(user_id)
-        password_field.send_keys(password)
+        # 送信後の画面遷移を確認
+        WebDriverWait(driver, 100).until(EC.title_contains("遷移先ページのタイトル"))
+        print("画面遷移成功")
+        logging.info("画面遷移成功")
 
 
-        # 短い待機時間を追加
-        time.sleep(2)  # 2秒待機
-
-
-        # 「ログイン」という文字を持つボタンを見つけてクリック
-        login_button = driver.find_element(By.XPATH, '//input[@value="ログイン"]')
-        login_button.click()
-
-
-        # ログイン後のページが完全にロードされるまで待機
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.TAG_NAME, 'body'))
-        )
-
-
-        # ログイン後のページがロードされた後、さらに待機
-        time.sleep(5)  # 5秒待機
-
-
-        # ログイン後のページを取得して確認
-        print(driver.page_source[:1000])  # 内容を一部表示（デバッグ用）
-
-
-    except Exception as e:
-        print(f"エラーが発生しました: {e}")
+    except Exception:
+        print("フォーム送信エラー")
+        logging.info("フォーム送信エラー")
     finally:
-        driver.quit()  # ブラウザを閉じる
-
-
-if __name__ == "__main__":
-    login_url = "https://net.seino.co.jp/ninsyo/"  # ログインページのURL
-    user_id = "your_id"  # 実際のIDを入力
-    password = "your_password"  # 実際のパスワードを入力
-
-
-    login_with_selenium(login_url, user_id, password)
+        driver.quit()
+else:
+    logging.info("トークン取得失敗")
+    print("reCAPTCHA 解決失敗")
