@@ -1,0 +1,74 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import time
+
+
+def login_with_selenium(url, user_id, password):
+    driver = webdriver.Chrome()  # WebDriverの初期化（ChromeDriverを使用）
+    driver.get(url)  # ログインページを開く
+
+
+    try:
+        # フレームに切り替える
+        WebDriverWait(driver, 30).until(
+            EC.frame_to_be_available_and_switch_to_it((By.CSS_SELECTOR, 'frame[src="./login.do"]'))
+        )
+
+
+        # ログインIDとパスワードのフィールドが表示されるまで待機
+        WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.NAME, 'loginid'))
+        )
+        WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.NAME, 'passwd'))
+        )
+
+
+        # ログインIDとパスワードを入力
+        login_field = driver.find_element(By.NAME, 'loginid')
+        password_field = driver.find_element(By.NAME, 'passwd')
+
+
+        login_field.send_keys(user_id)
+        password_field.send_keys(password)
+
+
+        # 短い待機時間を追加
+        time.sleep(2)  # 2秒待機
+
+
+        # 「ログイン」という文字を持つボタンを見つけてクリック
+        login_button = driver.find_element(By.XPATH, '//input[@value="ログイン"]')
+        login_button.click()
+
+
+        # ログイン後のページが完全にロードされるまで待機
+        WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.TAG_NAME, 'body'))
+        )
+
+
+        # ログイン後のページがロードされた後、さらに待機
+        time.sleep(5)  # 5秒待機
+
+
+        # ログイン後のページを取得して確認
+        print(driver.page_source[:1000])  # 内容を一部表示（デバッグ用）
+
+
+    except Exception as e:
+        print(f"エラーが発生しました: {e}")
+    finally:
+        driver.quit()  # ブラウザを閉じる
+
+
+if __name__ == "__main__":
+    login_url = "https://net.seino.co.jp/ninsyo/"  # ログインページのURL
+    user_id = "your_id"  # 実際のIDを入力
+    password = "your_password"  # 実際のパスワードを入力
+
+
+    login_with_selenium(login_url, user_id, password)
